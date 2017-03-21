@@ -530,7 +530,8 @@ TESTSUITE ( and-or-not-synonyms aastep arithmetic array array-derivs array-range
             function-earlyreturn function-simple function-outputelem
             geomath getattribute-camera getsymbol-nonheap gettextureinfo
             group-outputs groupstring
-            hyperb ieee_fp if incdec initops intbits isconnected isconstant
+            hex hyperb
+            ieee_fp if incdec initops intbits isconnected isconstant
             layers layers-Ciassign layers-entry layers-lazy
             layers-nonlazycopy layers-repeatedoutputs
             linearstep
@@ -549,7 +550,7 @@ TESTSUITE ( and-or-not-synonyms aastep arithmetic array array-derivs array-range
             oslinfo-arrayparams oslinfo-metadata oslinfo-noparams
             osl-imageio
             printf-whole-array
-            raytype reparam
+            raytype raytype-specialized reparam
             render-background render-bumptest
             render-cornell render-furnace-diffuse
             render-microfacet render-oren-nayar render-veachmis render-ward

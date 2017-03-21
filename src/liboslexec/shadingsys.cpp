@@ -475,6 +475,16 @@ ShadingSystem::optimize_group (ShaderGroup *group)
 
 
 
+void
+ShadingSystem::set_raytypes (ShaderGroup *group,
+                             int raytypes_on, int raytypes_off)
+{
+    ASSERT (group);
+    m_impl->set_raytypes (*group, raytypes_on, raytypes_off);
+}
+
+
+
 static TypeDesc TypeFloatArray2 (TypeDesc::FLOAT, 2);
 
 
@@ -618,6 +628,9 @@ ustring subimage("subimage"), subimagename("subimagename");
 ustring missingcolor("missingcolor"), missingalpha("missingalpha");
 ustring end("end"), useparam("useparam");
 ustring uninitialized_string("!!!uninitialized!!!");
+ustring raytype("raytype");
+ustring color("color"), point("point"), vector("vector"), normal("normal");
+ustring matrix("matrix");
 };
 
 
@@ -750,7 +763,8 @@ ShadingSystemImpl::ShadingSystemImpl (RendererServices *renderer,
     // if this default ordering is not to its liking.
     static const char *raytypes[] = {
         /*1*/ "camera", /*2*/ "shadow", /*4*/ "reflection", /*8*/ "refraction",
-        /*16*/ "diffuse", /*32*/ "glossy"
+        /*16*/ "diffuse", /*32*/ "glossy", /*64*/ "subsurface",
+        /*128*/ "displacement"
     };
     const int nraytypes = sizeof(raytypes)/sizeof(raytypes[0]);
     attribute ("raytypes", TypeDesc(TypeDesc::STRING,nraytypes), raytypes);
@@ -793,8 +807,8 @@ shading_system_setup_op_descriptors (ShadingSystemImpl::OpDescriptorMap& op_desc
     OP (atan,        generic,             none,          true,      0);
     OP (atan2,       generic,             none,          true,      0);
     OP (backfacing,  get_simple_SG_field, none,          true,      0);
-    OP (bitand,      bitwise_binary_op,   none,          true,      0);
-    OP (bitor,       bitwise_binary_op,   none,          true,      0);
+    OP (bitand,      bitwise_binary_op,   bitand,        true,      0);
+    OP (bitor,       bitwise_binary_op,   bitor,         true,      0);
     OP (blackbody,   blackbody,           none,          true,      0);
     OP (break,       loopmod_op,          none,          false,     0);
     OP (calculatenormal, calculatenormal, none,          true,      0);
@@ -804,7 +818,7 @@ shading_system_setup_op_descriptors (ShadingSystemImpl::OpDescriptorMap& op_desc
     OP (closure,     closure,             none,          true,      0);
     OP (color,       construct_color,     triple,        true,      0);
     OP (compassign,  compassign,          compassign,    false,     0);
-    OP (compl,       unary_op,            none,          true,      0);
+    OP (compl,       unary_op,            compl,         true,      0);
     OP (compref,     compref,             compref,       true,      0);
     OP (concat,      generic,             concat,        true,      0);
     OP (continue,    loopmod_op,          none,          false,     0);
@@ -889,7 +903,7 @@ shading_system_setup_op_descriptors (ShadingSystemImpl::OpDescriptorMap& op_desc
     OP (printf,      printf,              none,          false,     0);
     OP (psnoise,     noise,               noise,         true,      0);
     OP (radians,     generic,             radians,       true,      0);
-    OP (raytype,     raytype,             none,          true,      0);
+    OP (raytype,     raytype,             raytype,       true,      0);
     OP (regex_match, regex,               none,          false,     0);
     OP (regex_search, regex,              regex_search,  false,     0);
     OP (return,      return,              none,          false,     0);
@@ -932,7 +946,7 @@ shading_system_setup_op_descriptors (ShadingSystemImpl::OpDescriptorMap& op_desc
     OP (warning,     printf,              warning,       false,     0);
     OP (wavelength_color, blackbody,      none,          true,      0);
     OP (while,       loop_op,             none,          false,     0);
-    OP (xor,         bitwise_binary_op,   none,          true,      0);
+    OP (xor,         bitwise_binary_op,   xor,           true,      0);
 #undef OP
 #undef TEX
 }
@@ -1307,6 +1321,10 @@ ShadingSystemImpl::getattribute (ShaderGroup *group, string_view name,
             ((ustring *)val)[i] = group->m_renderer_outputs[i];
         for (size_t i = n;  i < type.numelements();  ++i)
             ((ustring *)val)[i] = ustring();
+        return true;
+    }
+    if (name == "raytype_queries" && type.basetype == TypeDesc::INT) {
+        *(int *)val = group->raytype_queries();
         return true;
     }
     if (name == "num_entry_layers" && type.basetype == TypeDesc::INT) {
@@ -1828,6 +1846,16 @@ ShadingSystemImpl::ShaderGroupEnd (void)
         if (m_opt_merge_instances >= 2)
             merge_instances (*m_curgroup);
     }
+
+    // Merge the raytype_queries of all the individual layers
+    m_curgroup->m_raytype_queries = 0;
+    for (int layer = 0, n = m_curgroup->nlayers();  layer < n;  ++layer) {
+        ASSERT ((*m_curgroup)[layer]);
+        if (ShaderInstance *inst = (*m_curgroup)[layer])
+            m_curgroup->m_raytype_queries |= inst->master()->raytype_queries();
+    }
+    // std::cout << "Group " << m_curgroup->name() << " ray query bits "
+    //         << m_curgroup->m_raytype_queries << "\n";
 
     {
         // Record the group in the SS's census of all extant groups
@@ -2551,6 +2579,9 @@ ShadingSystemImpl::group_post_jit_cleanup (ShaderGroup &group)
 void
 ShadingSystemImpl::optimize_group (ShaderGroup &group)
 {
+    if (group.optimized())
+        return;    // already optimized
+
     OIIO::Timer timer;
     lock_guard lock (group.m_mutex);
     if (group.optimized()) {
@@ -2582,6 +2613,7 @@ ShadingSystemImpl::optimize_group (ShaderGroup &group)
 
     ShadingContext *ctx = get_context ();
     RuntimeOptimizer rop (*this, group, ctx);
+    rop.set_raytypes (group.m_raytypes_on, group.m_raytypes_off);
     rop.run ();
 
     // Copy some info recorted by the RuntimeOptimizer into the group
@@ -2631,6 +2663,16 @@ ShadingSystemImpl::optimize_group (ShaderGroup &group)
     m_stat_groups_compiled += 1;
     m_stat_instances_compiled += group.nlayers();
     m_groups_to_compile_count -= 1;
+}
+
+
+
+void
+ShadingSystemImpl::set_raytypes (ShaderGroup &group,
+								 int raytypes_on, int raytypes_off)
+{
+	group.m_raytypes_on = raytypes_on;
+	group.m_raytypes_off = raytypes_off;
 }
 
 
