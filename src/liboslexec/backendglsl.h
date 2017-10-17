@@ -48,6 +48,7 @@ private:
 		int arrayindex, 
 		int component);
 	void assign_initial_value(const Symbol & sym);
+	void gen_assign(const Symbol & a, const Symbol & b);
 	bool build_instance(bool groupentry);
 	void build_init();
 

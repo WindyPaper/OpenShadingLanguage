@@ -469,6 +469,20 @@ void BackendGLSL::assign_initial_value(const Symbol & sym)
     }
 }
 
+void BackendGLSL::gen_assign(const Symbol & a, const Symbol & b)
+{
+	Symbol* da = a.dealias();
+    std::string ma = da->mangled();
+
+	Symbol* db = b.dealias();
+    std::string mb = db->mangled();
+
+	begin_code(ma);
+	add_code(" = ");
+	add_code(mb);
+	add_code("\n");
+}
+
 bool BackendGLSL::build_instance(bool groupentry)
 {
 	// Make a layer function: void layer_func(ShaderGlobals*, GroupData*)
@@ -581,7 +595,7 @@ bool BackendGLSL::build_instance(bool groupentry)
                 run_connected_layers (*srcsym, con.src.param, -1, NULL);
                 // FIXME -- I'm not sure I understand this.  Isn't this
                 // unnecessary if we wrote to the parameter ourself?
-                //llvm_assign_impl (*dstsym, *srcsym);
+                gen_assign (*dstsym, *srcsym);
             }
         }
     }
