@@ -28,6 +28,11 @@ public:
 	const std::string & get_code() const { return m_code; }
 
 private:
+	void reset_code();
+	void begin_code(const std::string & code);
+	void add_code(const std::string & code);
+	void push_block();
+	void pop_block();
 	bool gen_code(const Opcode & op);
 	void call_layer(int layer, bool unconditional);
 	void run_connected_layers(
@@ -50,6 +55,7 @@ private:
 	std::vector<int> m_layer_remap;     ///< Remapping of layer ordering
 	std::set<int> m_layers_already_run; ///< List of layers run
     int m_num_used_layers;              ///< Number of layers actually used
+	int m_block_level;
 };
 
 

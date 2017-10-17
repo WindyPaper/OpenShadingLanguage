@@ -37,13 +37,48 @@ BackendGLSL::~BackendGLSL()
 {
 }
 
+void BackendGLSL::reset_code()
+{
+	m_code.clear();
+	m_block_level = 0;
+}
+
+void BackendGLSL::begin_code(const std::string & code)
+{
+	for (int i = 0; i < m_block_level; ++i)
+	{
+		m_code += "    ";
+	}
+
+	add_code(code);
+}
+
+void BackendGLSL::add_code(const std::string & code)
+{
+	m_code += code;
+}
+
+void BackendGLSL::push_block()
+{
+	begin_code("{\n");
+
+	++ m_block_level;
+}
+
+void BackendGLSL::pop_block()
+{
+	-- m_block_level;
+
+	begin_code("}\n");
+}
+
 bool BackendGLSL::gen_code(const Opcode & op)
 {
-	m_code += op.opname().string();
+	begin_code(op.opname().string());
 	for (int i = 0; i < op.nargs(); ++i)
 	{
 		Symbol & sym = *opargsym(op, i);
-		m_code += " ";
+		add_code(" ");
 
 		Symbol* dealiased = sym.dealias();
 		std::string mangled_name = dealiased->mangled();
@@ -54,29 +89,29 @@ bool BackendGLSL::gen_code(const Opcode & op)
 			int n = int(t.aggregate * t.numelements());
 			if (t.basetype == TypeDesc::FLOAT) {
 				for (int j = 0; j < n; ++j) {
-					m_code += (j ? " " : "");
-					m_code += Strutil::format("%.9f", ((float *)dealiased->data())[j]);
+					add_code(j ? " " : "");
+					add_code(Strutil::format("%.9f", ((float *)dealiased->data())[j]));
 				}
 			} else if (t.basetype == TypeDesc::INT) {
 				for (int j = 0; j < n; ++j) {
-					m_code += (j ? " " : "");
-					m_code += Strutil::format("%d", ((int *)dealiased->data())[j]);
+					add_code(j ? " " : "");
+					add_code(Strutil::format("%d", ((int *)dealiased->data())[j]));
 				}
 			} else if (t.basetype == TypeDesc::STRING) {
 				for (int j = 0; j < n; ++j) {
-					m_code += (j ? " " : "");
-					m_code += "\"";
-					m_code += Strutil::escape_chars(((ustring *)dealiased->data())[j].string());
-					m_code += "\"";
+					add_code(j ? " " : "");
+					add_code("\"");
+					add_code(Strutil::escape_chars(((ustring *)dealiased->data())[j].string()));
+					add_code("\"");
 				}
 			}
 		}
 		else
 		{
-			m_code += mangled_name;
+			add_code(mangled_name);
 		}
 	}
-	m_code += "\n";
+	add_code("\n");
 	return true;
 }
 
@@ -109,6 +144,28 @@ void BackendGLSL::call_layer(int layer, bool unconditional)
 
     std::string name = Strutil::format ("%s_%d", parent->layername().c_str(),
                                         parent->id());
+
+	if (!unconditional)
+	{
+		begin_code("if !run[");
+		add_code(name);
+		add_code("]\n");
+
+		push_block();
+
+		begin_code("call_layer ");
+		add_code(name);
+		add_code("\n");
+		
+		pop_block();
+	}
+	else
+	{
+		begin_code("call_layer ");
+		add_code(name);
+		add_code("\n");
+	}
+
     // Mark the call as a fast call
     //llvm::Value *funccall = ll.call_function (name.c_str(), args, 2);
     //if (!parent->entry_layer())
@@ -176,17 +233,23 @@ bool BackendGLSL::build_op(int opnum)
 	{
 		gen_code(op);
 
-		m_code += "{\n";
+		push_block();
 
 		// Then block
 		build_block (opnum + 1, op.jump(0));
 
-		m_code += "} else {\n";
+		pop_block();
 
 		// Else block
-		build_block (op.jump(0), op.jump(1));
+		if (op.jump(0) < op.jump(1))
+		{
+			begin_code("else\n");
+			push_block();
 
-		m_code += "}\n";
+			build_block (op.jump(0), op.jump(1));
+
+			pop_block();
+		}
 
 		return true;
 	}
@@ -194,11 +257,11 @@ bool BackendGLSL::build_op(int opnum)
 	{
 		gen_code(op);
 
-		m_code += "{\n";
+		push_block();
 
 		build_block (opnum + 1, op.jump(0));
 
-		m_code += "}\n";
+		pop_block();
 
 		return true;
 	}
@@ -320,9 +383,9 @@ void BackendGLSL::allocate_symbol(const Symbol & sym)
 	Symbol* dealiased = sym.dealias();
     std::string mangled_name = dealiased->mangled();
     
-	m_code += mangled_name;
-	m_code += "\n";
-} 
+	begin_code(mangled_name);
+	add_code("\n");
+}
 
 void BackendGLSL::assign_zero(const Symbol & sym)
 {
@@ -340,8 +403,8 @@ void BackendGLSL::assign_zero(const Symbol & sym)
 	Symbol* dealiased = sym.dealias();
     std::string mangled_name = dealiased->mangled();
     
-	m_code += mangled_name;
-	m_code += " = 0\n";
+	begin_code(mangled_name);
+	add_code(" = 0\n");
 }
 
 void BackendGLSL::store_value(
@@ -352,11 +415,8 @@ void BackendGLSL::store_value(
 	Symbol* dealiased = sym.dealias();
     std::string mangled_name = dealiased->mangled();
 
-	m_code += mangled_name;
-
-	char buf[256];
-	sprintf(buf, "[%d][%d] = 0\n", arrayindex, component);
-	m_code += buf;
+	begin_code(mangled_name);
+	add_code(Strutil::format("[%d][%d] = 0\n", arrayindex, component));
 }
 
 void BackendGLSL::assign_initial_value(const Symbol & sym)
@@ -415,8 +475,10 @@ bool BackendGLSL::build_instance(bool groupentry)
     // Note that the GroupData* is passed as a void*.
     std::string unique_layer_name = Strutil::format ("%s_%d", inst()->layername(), inst()->id());
 
-	m_code += unique_layer_name;
-	m_code += "\n";
+	begin_code("layer ");
+	add_code(unique_layer_name);
+	add_code("\n");
+	push_block();
 
 	// TODO: Handle "exit" with m_exit_instance_block here...
 
@@ -516,13 +578,15 @@ bool BackendGLSL::build_instance(bool groupentry)
             if (con.srclayer == this->layer()) {
                 Symbol *srcsym (inst()->symbol (con.src.param));
                 Symbol *dstsym (child->symbol (con.dst.param));
-                //llvm_run_connected_layers (*srcsym, con.src.param);
+                run_connected_layers (*srcsym, con.src.param, -1, NULL);
                 // FIXME -- I'm not sure I understand this.  Isn't this
                 // unnecessary if we wrote to the parameter ourself?
                 //llvm_assign_impl (*dstsym, *srcsym);
             }
         }
     }
+
+	pop_block();
 
 	return true;
 }
@@ -533,8 +597,9 @@ void BackendGLSL::build_init()
     // Note that the GroupData* is passed as a void*.
     std::string unique_name = Strutil::format ("group_%d_init", group().id());
 
-	m_code += unique_name;
-	m_code += "\n";
+	begin_code("init ");
+	add_code(unique_name);
+	add_code("\n");
 
     // Group init clears all the "layer_run" and "userdata_initialized" flags.
     if (m_num_used_layers > 1) {
@@ -565,7 +630,7 @@ void BackendGLSL::build_init()
 
 void BackendGLSL::run()
 {
-	m_code.clear();
+	reset_code();
 
 	// TODO: Include all built-in ops here...
 
