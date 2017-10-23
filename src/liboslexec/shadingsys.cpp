@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "oslexec_pvt.h"
 #include "OSL/genclosure.h"
 #include "backendllvm.h"
+#include "backendglsl.h"
 #include "OSL/oslquery.h"
 
 #include <OpenImageIO/strutil.h>
@@ -471,6 +472,18 @@ ShadingSystem::optimize_group (ShaderGroup *group)
 {
     ASSERT (group);
     m_impl->optimize_group (*group);
+}
+
+
+
+void
+ShadingSystem::compile_generic (const char *language, 
+								ShaderGroup *group, 
+								std::string & code)
+{
+	ASSERT (language);
+	ASSERT (group);
+	m_impl->compile_generic (language, *group, code);
 }
 
 
@@ -2616,7 +2629,7 @@ ShadingSystemImpl::optimize_group (ShaderGroup &group)
     rop.set_raytypes (group.m_raytypes_on, group.m_raytypes_off);
     rop.run ();
 
-    // Copy some info recorted by the RuntimeOptimizer into the group
+    // Copy some info recorded by the RuntimeOptimizer into the group
     group.m_unknown_textures_needed = rop.m_unknown_textures_needed;
     BOOST_FOREACH (ustring f, rop.m_textures_needed)
         group.m_textures_needed.push_back (f);
@@ -2663,6 +2676,62 @@ ShadingSystemImpl::optimize_group (ShaderGroup &group)
     m_stat_groups_compiled += 1;
     m_stat_instances_compiled += group.nlayers();
     m_groups_to_compile_count -= 1;
+}
+
+
+
+void
+ShadingSystemImpl::compile_generic (const char *language, 
+									ShaderGroup & group, 
+									std::string & code)
+{
+    lock_guard lock (group.m_mutex);
+	// Currently we don't cache the compilation result in 
+	// shader group to keep memory layout backward compatible
+	if (group.optimized()) {
+		error ("The group is already compiled before: %s", group.name().c_str());
+		return;
+	}
+
+    ShadingContext *ctx = get_context ();
+    RuntimeOptimizer rop (*this, group, ctx);
+    rop.set_raytypes (group.m_raytypes_on, group.m_raytypes_off);
+    rop.run ();
+
+    // Copy some info recorded by the RuntimeOptimizer into the group
+    group.m_unknown_textures_needed = rop.m_unknown_textures_needed;
+    BOOST_FOREACH (ustring f, rop.m_textures_needed)
+        group.m_textures_needed.push_back (f);
+    group.m_unknown_closures_needed = rop.m_unknown_closures_needed;
+    BOOST_FOREACH (ustring f, rop.m_closures_needed)
+        group.m_closures_needed.push_back (f);
+    BOOST_FOREACH (ustring f, rop.m_globals_needed)
+        group.m_globals_needed.push_back (f);
+    size_t num_userdata = rop.m_userdata_needed.size();
+    group.m_userdata_names.reserve (num_userdata);
+    group.m_userdata_types.reserve (num_userdata);
+    group.m_userdata_offsets.resize (num_userdata, 0);
+    group.m_userdata_derivs.reserve (num_userdata);
+    BOOST_FOREACH (const UserDataNeeded& n, rop.m_userdata_needed) {
+        group.m_userdata_names.push_back (n.name);
+        group.m_userdata_types.push_back (n.type);
+        group.m_userdata_derivs.push_back (n.derivs);
+    }
+    group.m_unknown_attributes_needed = rop.m_unknown_attributes_needed;
+    BOOST_FOREACH (const AttributeNeeded &f, rop.m_attributes_needed) {
+        group.m_attributes_needed.push_back (f.name);
+        group.m_attribute_scopes.push_back (f.scope);
+    }
+
+    BackendGLSL glsl_gen (*this, group, ctx);
+    glsl_gen.run ();
+	code = glsl_gen.get_code ();
+
+    group_post_jit_cleanup (group);
+
+    release_context (ctx);
+
+	group.m_optimized = true;
 }
 
 

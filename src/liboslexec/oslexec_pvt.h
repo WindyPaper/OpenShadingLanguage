@@ -121,6 +121,7 @@ typedef shared_ptr<ShaderInstance> ShaderInstanceRef;
 class Dictionary;
 class RuntimeOptimizer;
 class BackendLLVM;
+class BackendGLSL;
 struct ConnectedParam;
 
 void print_closure (std::ostream &out, const ClosureColor *closure, ShadingSystemImpl *ss);
@@ -582,6 +583,11 @@ public:
     /// this by optimizing the code knowing all our instance parameters
     /// (at least the ones that can't be overridden by the geometry).
     void optimize_group (ShaderGroup &group);
+
+	/// Generic compile, optimize, and code generation entry.
+	void compile_generic (const char *language, 
+						  ShaderGroup & group, 
+						  std::string & code);
 
 	/// Change current raytypes for optimize_group called later.
 	void set_raytypes (ShaderGroup &group,
@@ -1489,6 +1495,7 @@ private:
 
     friend class OSL::pvt::ShadingSystemImpl;
     friend class OSL::pvt::BackendLLVM;
+	friend class OSL::pvt::BackendGLSL;
     friend class ShadingContext;
 };
 

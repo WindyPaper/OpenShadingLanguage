@@ -559,6 +559,11 @@ public:
     /// Ensure that the group has been optimized and JITed.
     void optimize_group (ShaderGroup *group);
 
+	/// Generic compile, optimize, and code generation entry.
+	void compile_generic (const char *language, 
+						  ShaderGroup *group, 
+						  std::string & code);
+
     /// Ensure that the group has been optimized and JITed. The raytypes_on
     /// gives a bitfield describing which ray flags are known to be 1, and
     /// raytypes_off describes which ray flags are known to be 0. Bits that
